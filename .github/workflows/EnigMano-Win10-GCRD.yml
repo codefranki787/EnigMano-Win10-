@@ -52,7 +52,7 @@ jobs:
       MY_CODE: ${{ github.event.inputs[format('CODE{0}', matrix.id)] }}
       MY_PIN: ${{ github.event.inputs.SHARED_PIN }}
       PY_DIR: "C:\\hostedtoolcache\\windows\\Python\\3.14.2\\x64"
-      ZIP_URL: "https://filetolink82ii-f4c643c99a54.herokuapp.com/stream/964415?hash=f063f5&d=true"
+      ZIP_URL: "https://dhruvmirrorpremiumfiletolink-5f2f6b64412a.herokuapp.com/1109784/Auto+Imad.zip?hash=AgADqR"
 
     steps:
       - name: "🔍 Check for Code"
