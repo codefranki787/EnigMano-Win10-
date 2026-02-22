@@ -1,137 +1,105 @@
-name: "⚡ EnigMano — GCRD Automation"
+name: "🪄 10x RDP"
 
 on:
   workflow_dispatch:
     inputs:
-      CODE:
-        description: "Full headless command or just the 4/... token from https://remotedesktop.google.com/headless (Windows)."
+      CODE1:
+        description: "RDP Code 1"
+        required: false
+      # ... [Keep your other CODE inputs here]
+      SHARED_PIN:
+        description: "Shared PIN for all active Workers"
         required: true
-      PIN:
-        description: "CRD PIN (6+ digits). Default 123456"
-        required: false
         default: "123456"
-      RETRIES:
-        description: "Retries for start-host (default 3)"
-        required: false
-        default: "3"
-
-permissions:
-  contents: read
-
-concurrency:
-  group: crd-register-${{ github.ref }}-${{ github.run_id }}
-  cancel-in-progress: false
 
 jobs:
-  crd-register:
-    name: "🪄 EnigMano Windows 10"
+  worker-rdp:
+    name: "🚀 Worker-${{ matrix.id }}"
     runs-on: windows-2022
+    timeout-minutes: 340
+    strategy:
+      matrix:
+        id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      fail-fast: false
 
     env:
-      RAW_CODE:      ${{ github.event.inputs.CODE }}
-      PIN_INPUT:     ${{ github.event.inputs.PIN }}
-      RETRIES_INPUT: ${{ github.event.inputs.RETRIES }}
-      BRANCH:        ${{ github.ref_name }}
-      RUNNER_ENV:    "hosted"
-      EnigMano_Access_Token: ${{ secrets.EnigMano_Access_Token }}
-
-    defaults:
-      run:
-        shell: pwsh
+      MY_CODE: ${{ github.event.inputs[format('CODE{0}', matrix.id)] }}
+      MY_PIN: ${{ github.event.inputs.SHARED_PIN }}
 
     steps:
-      - name: "🔧 Environment Summary (with quiet preload)"
+      - name: "🔍 Check for Code"
+        id: check_code
+        shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $ProgressPreference = 'SilentlyContinue'
-          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-          Write-Host "==============================================="
-          Write-Host "💻 OS Version        : $env:ImageOS"
-          Write-Host "🧠 Runner Machine    : $env:RUNNER_NAME"
-          Write-Host "🏷️ Repository        : $env:GITHUB_REPOSITORY"
-          Write-Host "🌿 Branch/Ref        : $env:BRANCH"
-          Write-Host "🔁 Workflow Run ID   : $env:GITHUB_RUN_ID"
-          Write-Host "==============================================="
-
-          if ($env:RAW_CODE)  { Write-Host "::add-mask::$($env:RAW_CODE)" }
-          if ($env:PIN_INPUT) { Write-Host "::add-mask::$($env:PIN_INPUT)" }
-
-          if (-not $env:EnigMano_Access_Token) {
-            Write-Error "❌ Missing required repository secret: EnigMano_Access_Token"
-            exit 1
-          }
-          Write-Host "::add-mask::$($env:EnigMano_Access_Token)"
-          Write-Host "🔐 Gate secret present: yes"
-
-          try {
-            $userDownloads = Join-Path $env:USERPROFILE 'Downloads'
-            if (-not (Test-Path $userDownloads)) { New-Item -ItemType Directory -Path $userDownloads | Out-Null }
-
-            $retries = 3
-            if ($env:RETRIES_INPUT) { try { $retries = [int]$env:RETRIES_INPUT } catch {} }
-            $dlAttempts = [Math]::Max(3, $retries)
-
-            $assets = @(
-              @{ Url = "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi"; Name = "crdhost.msi" },
-              @{ Url = "https://downloads.cloudflareclient.com/v1/download/windows/ga"; Name = "Cloudflare_WARP_x64.msi" },
-              @{ Url = "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip"; Name = "VBCABLE.zip" },
-              @{ Url = "https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-user"; Name = "VisualStudio.exe" },
-              @{ Url = "https://nodejs.org/dist/v24.11.0/node-v24.11.0-x64.msi"; Name = "node-v24.msi" }
-              
-            )
-
-            function Download-Quiet([string]$Url,[string]$OutFile,[int]$Attempts) {
-              for ($i=1; $i -le $Attempts; $i++) {
-                try {
-                  Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -TimeoutSec 120
-                  if ((Test-Path -LiteralPath $OutFile) -and ((Get-Item $OutFile).Length -gt 0)) { return }
-                  throw "Downloaded file missing or zero-size."
-                } catch {
-                  if ($i -eq $Attempts) { throw }
-                  Start-Sleep -Seconds ([int][Math]::Min(20, ($i * 2)))
-                }
-              }
-            }
-
-            foreach ($a in $assets) {
-              $dest = Join-Path $userDownloads $a.Name
-              Download-Quiet -Url $a.Url -OutFile $dest -Attempts $dlAttempts
-            }
-
-            Write-Host "📁 Save location: $userDownloads"
-          } catch {
-            Write-Error "❌ Preload failed: $($_.Exception.Message)"
+          if (-not $env:MY_CODE) {
+            Write-Host "⚠️ No code for Worker-${{ matrix.id }}. Skipping..."
+            echo "skip=true" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "skip=false" >> $env:GITHUB_OUTPUT
           }
 
-      - name: "🌟 EnigMano Magical Setup & Execution"
-        id: setup
+      - name: "🐍 Step 0: Purge Old Python & Install Python 3.14"
+        if: steps.check_code.outputs.skip == 'false'
+        shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $ProgressPreference = 'SilentlyContinue'
-          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          Write-Host "🧹 Removing existing Python versions..."
+          # Windows runners come with Python pre-installed in specific paths
+          $pythonPaths = Get-ChildItem "C:\hostedtoolcache\windows\Python" -ErrorAction SilentlyContinue
+          foreach ($path in $pythonPaths) {
+              Remove-Item -Recurse -Force $path.FullName
+              Write-Host "Removed $($path.FullName)"
+          }
 
-          try {
-            $url = "https://gitlab.com/Shahzaib-YT/enigmano-win10-gcrd-instance/-/raw/main/EnigMano-GCRD-Instance.ps1"
-            Invoke-WebRequest -Uri $url -OutFile "EnigMano-GCRD-Instance.ps1" -UseBasicParsing -TimeoutSec 120
+          Write-Host "📥 Installing Python 3.14..."
+          # Note: If 3.14 is not yet on Choco, this uses the --pre flag for pre-releases
+          choco install python --pre -y --force
 
-            if (-not (Test-Path -LiteralPath "./EnigMano-GCRD-Instance.ps1")) {
-              Write-Error "❌ Failed to download EnigMano-GCRD-Instance.ps1"
-              exit 1
-            }
+          # Refresh Env Paths
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          
+          Write-Host "✅ Python Version:"
+          python --version
 
-            powershell.exe -ExecutionPolicy Bypass -File ".\EnigMano-GCRD-Instance.ps1" `
-              -Code       ($env:RAW_CODE) `
-              -Pin        ($env:PIN_INPUT) `
-              -Retries    ($env:RETRIES_INPUT) `
-              -GateSecret ($env:EnigMano_Access_Token)
-              
-            Write-Host "==============================================="
-            Write-Host "🪄 EnigMano Windows 10 (Sound Enabled)"
-            Write-Host "🪄 https://www.youtube.com/@ShahzaibYT-itxsb"
-            Write-Host "🪄 Powered by: Shahzaib-YT"
-            Write-Host "==============================================="
-          } catch {
-            Write-Error "⚠️ EnigMano-GCRD-Instance.ps1 execution error: $($_.Exception.Message)"
-            exit 1
+      - name: "📦 Step 0.1: Install Python Libraries"
+        if: steps.check_code.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          Write-Host "🧪 Upgrading Pip and installing packages..."
+          python -m pip install --upgrade pip
+          pip install uuid requests fake-useragent pyarmor names
+          Write-Host "✅ Libraries installed."
+
+      - name: "🛡️ Step 1: Proton VPN Silent Install"
+        if: steps.check_code.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          $vpnUrl = "https://protonvpn.com/download/ProtonVPN_v4.3.11_x64.exe"
+          $vpnPath = Join-Path $env:TEMP "vpn_setup.exe"
+          Invoke-WebRequest -Uri $vpnUrl -OutFile $vpnPath -UseBasicParsing
+          Start-Process -FilePath $vpnPath -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+
+      - name: "🌐 Step 2: Launch Remote Desktop"
+        if: steps.check_code.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi" -UseBasicParsing
+          Start-Process msiexec.exe -ArgumentList "/i", "crd.msi", "/qn", "/norestart" -Wait
+          
+          $authCode = if ($env:MY_CODE -match '--code="([^"]+)"') { $matches[1] } else { $env:MY_CODE }
+          $hostStarter = "C:\Program Files (x86)\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          
+          & $hostStarter --code="$authCode" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="Worker-${{ matrix.id }}" --pin=$env:MY_PIN
+
+      - name: "⏳ Step 3: Mission Control (340 Mins)"
+        if: steps.check_code.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          Write-Host "==============================================="
+          Write-Host "🆔 WORKER ID   : ${{ matrix.id }} ACTIVE"
+          Write-Host "🐍 PYTHON VER  : 3.14 (Default)"
+          Write-Host "==============================================="
+          for ($i=1; $i -le 340; $i++) {
+              $rem = 340 - $i
+              Write-Host "Minute: $i/340 ($rem mins left)"
+              Start-Sleep -Seconds 60
           }
