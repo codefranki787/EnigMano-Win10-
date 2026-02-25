@@ -1,4 +1,4 @@
-ame: "🪄 Imad Khan — Windows 10 Precision RDP"
+name: "🪄 Imad Khan — Windows 10 Precision RDP"
 
 on:
   workflow_dispatch:
